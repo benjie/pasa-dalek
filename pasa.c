@@ -70,6 +70,7 @@ void calculateBars(fftw_complex* fft, int fftSize, int* bars, int numBars)
 
 		// compute decibels.
 		int dB = LINES + (int)(10.0 * log10(power));
+		if(dB > LINES) dB = LINES;
 		if(dB < 0) dB = 0;
 
 		// set bar.
