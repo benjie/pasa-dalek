@@ -1,7 +1,3 @@
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -14,7 +10,6 @@
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <fftw3.h>
-
 #define PI 3.14159265358979323846264338327f
 
 struct sigaction old_sigint;
@@ -37,7 +32,44 @@ float windowFunction(int n, int N)
 
 void printUsage()
 {
+	printf("PulseAudio Spectrum Analyzer\n");
+	printf("\nUsage:\n");
+	printf("pasa [options] pulseaudio-device\n");
+	printf("\nOptions:\n");
+	printf("-r <n>\tframes per second (default 30)\n");
+	printf("-f <n>\tmaximum frequency (default 3520)\n");
+}
 
+void calculateBars(fftw_complex* fft, int fftSize, double fftUpper, int* bars, int numBars)
+{
+	// todo: use the float-point value and implement proper interpolation.
+	double barWidthD = fftUpper / numBars;
+	int barWidth = (int)ceil(barWidthD);
+
+	double scale = 2.0 / fftSize;
+	
+	// interpolate bars.
+	int i = 0;
+	for(int bar = 0; bar < numBars; bar++)
+	{
+		// get average.
+		double power = 0.0;
+		for(int j = 0; j < barWidth && i < fftSize; i++, j++)
+		{
+			double re = fft[i][0] * scale;
+			double im = fft[i][1] * scale;
+			power += re * re + im * im; // abs(c)
+		}
+		power *= (1.0 / barWidth); // average.
+		if(power < 1e-15) power = 1e-15; // prevent overflows.
+
+		// compute decibels.
+		int dB = LINES + (int)(10.0 * log10(power));
+		if(dB < 0) dB = 0;
+
+		// set bar.
+		bars[bar] = dB;
+	}
 }
 
 int main(int argc, char* argv[])
@@ -46,7 +78,7 @@ int main(int argc, char* argv[])
 	{
 		.format = PA_SAMPLE_FLOAT32LE,
 		.rate = 44100,
-		.channels = 1
+		.channels = 2
 	};
 
 	// configuration.
@@ -56,7 +88,7 @@ int main(int argc, char* argv[])
 
 	// parse command line arguments.
 	int c;
-	while ((c = getopt(argc, argv, "r:f:h")) != -1)
+	while ((c = getopt(argc, argv, "r:f:")) != -1)
 	{
 		switch(c)
 		{
@@ -68,7 +100,6 @@ int main(int argc, char* argv[])
 				upperFrequency = atof(optarg);
 				break;
 
-			case 'h':
 			case '?':
 				printUsage();
 				return 1;
@@ -90,25 +121,24 @@ int main(int argc, char* argv[])
 	}
 
 	// input buffer.
-	const int size = 44100 / framesPerSecond;
-	const double scale = 2.0 / size;
+	const int size = ss.rate / framesPerSecond;
 	float window[size];
-	float buffer[size];
+	float buffer[ss.channels * size];
 
 	// compute window.
 	for(int n = 0; n < size; n++)
 		window[n] = windowFunction(n, size);
-
-	// fftw setup
-	double *in = (double*)fftw_malloc(sizeof(double) * size);
-	fftw_complex *out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * size);
-	fftw_plan plan = fftw_plan_dft_r2c_1d(size, in, out, FFTW_MEASURE);
 
 	// replace SIGINT handler.
 	struct sigaction sigIntAction;
 	memset(&sigIntAction, 0, sizeof(sigIntAction));
 	sigIntAction.sa_handler = &onSigInt;
 	sigaction(SIGINT, &sigIntAction, &old_sigint);
+	
+	// fftw setup
+	double *in = (double*)fftw_malloc(sizeof(double) * size);
+	fftw_complex *out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * size);
+	fftw_plan plan = fftw_plan_dft_r2c_1d(size, in, out, FFTW_MEASURE);
 
 	run = true;
 
@@ -120,6 +150,9 @@ int main(int argc, char* argv[])
 	// record loop
 	while(run)
 	{
+		int barsL[COLS / 2];
+		int barsR[COLS / 2];
+
 		// read from device.
 		if (pa_simple_read(s, buffer, sizeof(buffer), &error) < 0)
 		{
@@ -128,48 +161,31 @@ int main(int argc, char* argv[])
 			return 1;
 		}
 
-		// convert input data.
-		int i;
-		for (i = 0; i < size; i++)
-			in[i] = (double)(window[i] * buffer[i]);
-	
-		// fast fourier transform.
+		// left input.
+		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2]);
 		fftw_execute(plan);
+		calculateBars(out, size, upperFrequency / framesPerSecond, barsL, COLS / 2);
 		
+		// right input.
+		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
+		fftw_execute(plan);
+		calculateBars(out, size, upperFrequency / framesPerSecond, barsR, COLS / 2);
+
 		// draw bars.
 		erase();
 		
-		// todo: use the float-point value and implement proper interpolation.
-		double barWidthD = (upperFrequency / framesPerSecond) / COLS;
-		int barWidth = (int)ceil(barWidthD);
-
-		//mvprintw(0, 0, "size = %d, barWidth = %f, COLS = %d", size, barWidthD, COLS);
-
-		i = 0;
-		int col = 0;
-		while(i < size)
+		// draw left
+		for(int i = 0; i < COLS / 2; i++)
 		{
-			// get average.
-			double power = 0.0;
-			for(int j = 0; j < barWidth && i < size; i++, j++)
-			{
-				double re = out[i][0] * scale;
-				double im = out[i][1] * scale;
-				power += re * re + im * im;
-			}
-			power *= (1.0 / barWidth); // average.
-			if(power < 1e-15) power = 1e-15;
+			move(LINES - barsL[i], i);
+			vline(barChar, barsL[i]);
+		}
 
-			// compute decibels.
-			int dB = LINES + (int)(10.0 * log10(power));
-			if(dB < 0) dB = 0;
-			
-			// draw line.
-			move(LINES - dB, col);
-			vline(barChar, dB);
-
-			// go to next column.
-			col++;
+		// draw right.
+		for(int i = 0; i < COLS / 2; i++)
+		{
+			move(LINES - barsR[i], COLS - 1 - i);
+			vline(barChar, barsR[i]);
 		}
 
 		// draw to screen.
