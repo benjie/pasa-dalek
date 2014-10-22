@@ -15,6 +15,10 @@
 struct sigaction old_sigint;
 bool run;
 
+int framesPerSecond = 30;
+double upperFrequency = 3520.0; // A7
+double gain = 1.0;
+
 void onSigInt()
 {
 	// reset SIGINT.
@@ -38,15 +42,16 @@ void printUsage()
 	printf("\nOptions:\n");
 	printf("-r <n>\tframes per second (default 30)\n");
 	printf("-f <n>\tmaximum frequency (default 3520)\n");
+	printf("-g <n>\tgain (i.e. a scaling factor for the bars, default 1.0)\n");
 }
 
-void calculateBars(fftw_complex* fft, int fftSize, double fftUpper, int* bars, int numBars)
+void calculateBars(fftw_complex* fft, int fftSize, int* bars, int numBars)
 {
 	// todo: use the float-point value and implement proper interpolation.
-	double barWidthD = fftUpper / numBars;
+	double barWidthD = upperFrequency / (framesPerSecond * numBars);
 	int barWidth = (int)ceil(barWidthD);
 
-	double scale = 2.0 / fftSize;
+	double scale = 2.0 / fftSize * gain;
 	
 	// interpolate bars.
 	int i = 0;
@@ -82,13 +87,11 @@ int main(int argc, char* argv[])
 	};
 
 	// configuration.
-	int framesPerSecond = 30;
-	double upperFrequency = 3520.0; // A7
 	int barChar = ACS_VLINE;
 
 	// parse command line arguments.
 	int c;
-	while ((c = getopt(argc, argv, "r:f:")) != -1)
+	while ((c = getopt(argc, argv, "r:f:g:")) != -1)
 	{
 		switch(c)
 		{
@@ -98,6 +101,10 @@ int main(int argc, char* argv[])
 
 			case 'f':
 				upperFrequency = atof(optarg);
+				break;
+
+			case 'g':
+				gain = atof(optarg);
 				break;
 
 			case '?':
@@ -164,12 +171,12 @@ int main(int argc, char* argv[])
 		// left input.
 		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2]);
 		fftw_execute(plan);
-		calculateBars(out, size, upperFrequency / framesPerSecond, barsL, COLS / 2);
+		calculateBars(out, size, barsL, COLS / 2);
 		
 		// right input.
 		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
 		fftw_execute(plan);
-		calculateBars(out, size, upperFrequency / framesPerSecond, barsR, COLS / 2);
+		calculateBars(out, size, barsR, COLS / 2);
 
 		// draw bars.
 		erase();
