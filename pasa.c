@@ -10,7 +10,6 @@
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <fftw3.h>
-#define PI 3.14159265358979323846264338327f
 
 struct sigaction old_sigint;
 bool run;
@@ -31,7 +30,7 @@ void onSigInt()
 // hanning window.
 float windowFunction(int n, int N)
 {
-	return 0.5f * (1.0f - cosf(2.0f * PI * n / (N - 1.0f)));
+	return 0.5f * (1.0f - cosf(2.0f * M_PI * n / (N - 1.0f)));
 }
 
 void printUsage()
