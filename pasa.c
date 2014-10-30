@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE_EXTENDED 
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -6,7 +8,8 @@
 #include <math.h>
 #include <errno.h>
 #include <signal.h>
-#include <ncurses.h>
+#include <locale.h>
+#include <curses.h>
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <fftw3.h>
@@ -86,12 +89,9 @@ int main(int argc, char* argv[])
 		.channels = 2
 	};
 
-	// configuration.
-	int barChar = ACS_VLINE;
-
 	// parse command line arguments.
 	int c;
-	while ((c = getopt(argc, argv, "r:f:g:")) != -1)
+	while((c = getopt(argc, argv, "r:f:g:")) != -1)
 	{
 		switch(c)
 		{
@@ -121,7 +121,7 @@ int main(int argc, char* argv[])
 	pa_simple *s = pa_simple_new(NULL, "pasa", PA_STREAM_RECORD, optind < argc ? argv[optind] : NULL, "pasa", &ss, NULL, NULL, &error);
 
 	// check error
-	if (!s)
+	if(!s)
 	{
 		fprintf(stderr, "pa_simple_new() failed: %s\n", pa_strerror(error));
 		return 1;
@@ -150,6 +150,7 @@ int main(int argc, char* argv[])
 	run = true;
 
 	// ncurses setup.
+	setlocale(LC_ALL, "");
 	initscr();
 	//start_color();
 	curs_set(0);
@@ -169,12 +170,12 @@ int main(int argc, char* argv[])
 		}
 
 		// left input.
-		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2]);
+		for(int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2]);
 		fftw_execute(plan);
 		calculateBars(out, size, barsL, COLS / 2);
 		
 		// right input.
-		for (int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
+		for(int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
 		fftw_execute(plan);
 		calculateBars(out, size, barsR, COLS / 2);
 
@@ -185,14 +186,14 @@ int main(int argc, char* argv[])
 		for(int i = 0; i < COLS / 2; i++)
 		{
 			move(LINES - barsL[i], i);
-			vline(barChar, barsL[i]);
+			vline_set(WACS_T_VLINE, barsL[i]);
 		}
 
 		// draw right.
 		for(int i = 0; i < COLS / 2; i++)
 		{
 			move(LINES - barsR[i], COLS - 1 - i);
-			vline(barChar, barsR[i]);
+			vline_set(WACS_T_VLINE, barsR[i]);
 		}
 
 		// draw to screen.
@@ -212,4 +213,3 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
-
