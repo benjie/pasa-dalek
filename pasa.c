@@ -9,7 +9,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <locale.h>
-#include <curses.h>
+#include <ncursesw/curses.h>
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <fftw3.h>
