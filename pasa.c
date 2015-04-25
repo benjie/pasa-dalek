@@ -21,6 +21,12 @@ int framesPerSecond = 30;
 double upperFrequency = 3520.0; // A7
 double gain = 1.0;
 
+const int kCOLS = 64;
+const int kSTART = 2;
+const int kSTOP = 5;
+const double kTHRESHOLD = 0.3;
+
+
 void onSigInt()
 {
 	// reset SIGINT.
@@ -45,6 +51,44 @@ void printUsage()
 	printf("-r <n>\tframes per second (default 30)\n");
 	printf("-f <n>\tmaximum frequency (default 3520)\n");
 	printf("-g <n>\tgain (i.e. a scaling factor for the bars, default 1.0)\n");
+}
+
+double total(fftw_complex* fft, int fftSize, int* bars, int numBars)
+{
+	// todo: use the float-point value and implement proper interpolation.
+	double barWidthD = upperFrequency / (framesPerSecond * numBars);
+	int barWidth = (int)ceil(barWidthD);
+
+	double scale = 2.0 / fftSize * gain;
+	
+	// interpolate bars.
+	int i = 0;
+	double total = 0.0;
+	for(int bar = 0; bar < numBars; bar++)
+	{
+		// get average.
+		double power = 0.0;
+		for(int j = 0; j < barWidth && i < fftSize; i++, j++)
+		{
+			double re = fft[i][0] * scale;
+			double im = fft[i][1] * scale;
+			power += re * re + im * im; // abs(c)
+		}
+		power *= (1.0 / barWidth); // average.
+		if(power < 1e-15) power = 1e-15; // prevent overflows.
+
+		// compute decibels.
+		int dB = LINES + (int)(10.0 * log10(power));
+		if(dB > LINES) dB = LINES;
+		if(dB < 0) dB = 0;
+
+		// set bar.
+		bars[bar] = dB;
+		if (bar >= kSTART && bar <= kSTOP) {
+			total += dB;
+		}
+	}
+	return total / (kSTOP - kSTART + 1);
 }
 
 void calculateBars(fftw_complex* fft, int fftSize, int* bars, int numBars)
@@ -158,8 +202,8 @@ int main(int argc, char* argv[])
 	// record loop
 	while(run)
 	{
-		int barsL[COLS / 2];
-		int barsR[COLS / 2];
+		int barsL[kCOLS / 2];
+		int barsR[kCOLS / 2];
 
 		// read from device.
 		if (pa_simple_read(s, buffer, sizeof(buffer), &error) < 0)
@@ -172,27 +216,31 @@ int main(int argc, char* argv[])
 		// left input.
 		for(int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2]);
 		fftw_execute(plan);
-		calculateBars(out, size, barsL, COLS / 2);
-		
-		// right input.
-		for(int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
-		fftw_execute(plan);
-		calculateBars(out, size, barsR, COLS / 2);
+		double value = total(out, size, barsL, kCOLS / 2);
+		for (int i = 0; i < kCOLS/2; i++) {
+			barsL[i] = barsR[i] = (value > kTHRESHOLD ? value : 0);
+		}
+		//calculateBars(out, size, barsL, kCOLS / 2);
+		//
+		//// right input.
+		//for(int i = 0; i < size; i++) in[i] = (double)(window[i] * buffer[i * 2 + 1]);
+		//fftw_execute(plan);
+		//calculateBars(out, size, barsR, kCOLS / 2);
 
 		// draw bars.
 		erase();
 		
 		// draw left
-		for(int i = 0; i < COLS / 2; i++)
+		for(int i = 0; i < kCOLS / 2; i++)
 		{
 			move(LINES - barsL[i], i);
 			vline_set(WACS_T_VLINE, barsL[i]);
 		}
 
 		// draw right.
-		for(int i = 0; i < COLS / 2; i++)
+		for(int i = 0; i < kCOLS / 2; i++)
 		{
-			move(LINES - barsR[i], COLS - 1 - i);
+			move(LINES - barsR[i], kCOLS - 1 - i);
 			vline_set(WACS_T_VLINE, barsR[i]);
 		}
 
